@@ -1,31 +1,53 @@
 import express, { Request, Response } from "express";
-import fs from "fs";
+import request from "request";
+import { PassThrough } from "stream";
+import cloudinary from "cloudinary";
+import * as dotenv from "dotenv";
+dotenv.config();
+
 const app = express();
 
+cloudinary.v2.config({
+  cloud_name: process.env.CLOUD_NAME,
+  api_key: process.env.API_KEY,
+  api_secret: process.env.API_SECRET,
+});
+
 app.get("/video", (req: Request, res: Response) => {
-  const range = req.headers?.range;
-  const videoPath = "./teste.mp4";
-  const videoSize = fs.statSync(videoPath).size;
+  const videoId: any = process.env.CLOUDINARY_VIDEO;
+  const format = "mp4";
+  const cloudinaryStream = cloudinary.v2.video(videoId, {
+    resource_type: "video",
+    format: format,
+    streaming_profile: "hd",
+  });
 
-  //quantidade em bytes
-  const CHUNK_SIZE = 1 * 1e6;
-  const start = Number(range?.replace(/\D/g, ""));
-  const end = Math.min(start + CHUNK_SIZE, videoSize - 1);
+  const passThroughStream = new PassThrough();
 
-  const contentLength = end - start + 1;
+  res.writeHead(200, {
+    "Content-Type": `video/${format}`,
+    "Content-Disposition": "inline",
+  });
 
-  const headers = {
-    "Content-range": `bytes ${start}-${end}/${videoSize}`,
-    "Accept-Ranges": "bytes",
-    "Content-Length": contentLength,
-    "Content-Type": "video/mp4",
-  };
-  res.writeHead(206, headers);
+  cloudinaryStream.on("error", (err: Error) => {
+    console.log("Erro captuado:", err);
+    passThroughStream.destroy(err);
+  });
 
-  const stream = fs.createReadStream(videoPath, { start, end });
-  stream.pipe(res);
+  passThroughStream.on("error", (err: Error) => {
+    console.log("Erro no front", err);
+  });
+
+  passThroughStream.on("close", () => {
+    console.log("Vídeo concluído");
+  });
+
+  passThroughStream.pipe(res);
+  request
+    .get(cloudinaryStream)
+    .pipe(passThroughStream as unknown as NodeJS.WritableStream);
 });
 
 app.listen(3000, () => {
-  console.log("running in 3000");
+  console.log("Running in 3000");
 });
